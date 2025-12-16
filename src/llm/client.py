@@ -5,6 +5,7 @@ from langchain_openai import ChatOpenAI
 # 自动加载 .env 文件
 load_dotenv()
 
+
 def get_llm():
     """获取配置好的 Qwen (通义千问) 客户端"""
     api_key = os.getenv("DASHSCOPE_API_KEY")

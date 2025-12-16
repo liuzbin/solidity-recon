@@ -1,28 +1,31 @@
 # 使用 Foundry 官方镜像
 FROM ghcr.io/foundry-rs/foundry:latest
 
-# 切换到 root 用户以确保有权限安装软件
 USER root
 
-# 1. 使用 apt-get 安装 Python3, pip, venv 和 git
-# (注意：Debian/Ubuntu 下 venv 需要单独安装)
+# 1. 安装基础工具
 RUN apt-get update && \
     apt-get install -y python3 python3-pip python3-venv git && \
     rm -rf /var/lib/apt/lists/*
 
-# 2. 创建虚拟环境 (PEP 668 标准)
+# 2. 安装 forge-std 标准库 (关键步骤！)
+# 我们把它装在 /opt/foundry/lib 下，这样挂载 /app 时不会被覆盖
+WORKDIR /opt/foundry/lib
+RUN git clone https://github.com/foundry-rs/forge-std.git
+
+# 3. 配置 Python 环境
 ENV VIRTUAL_ENV=/opt/venv
 RUN python3 -m venv $VIRTUAL_ENV
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
-# 3. 安装 Slither 和 solc-select
+# 4. 安装 Slither
 RUN pip install slither-analyzer solc-select
 
-# 4. 安装指定的 Solidity 版本
+# 5. 安装 Solidity
 RUN solc-select install 0.8.20 && solc-select use 0.8.20
 
-# 5. 设置工作目录
+# 6. 设置工作目录
 WORKDIR /app
 
-# 6. 默认入口
+# 7. 入口
 ENTRYPOINT ["/bin/sh", "-c"]
