@@ -1,32 +1,83 @@
 import subprocess
 import os
 import json
-from src.tools.file_utils import WORKSPACE_DIR
+from .file_utils import WORKSPACE_DIR
 
 
 def create_foundry_config():
-    """创建一个 foundry.toml 配置文件，告诉 Forge 在根目录查找文件"""
+    """
+    [配置] 创建 foundry.toml
+    """
     config_content = """
 [profile.default]
 src = "."
 test = "."
 out = "out"
-libs = ["/opt/foundry/lib"]  # 指向我们在 Dockerfile 里安装库的位置
+libs = ["/opt/foundry/lib"]
 """
     config_path = os.path.join(WORKSPACE_DIR, "foundry.toml")
     with open(config_path, "w", encoding="utf-8") as f:
         f.write(config_content)
 
 
+def extract_json_from_stdout(stdout: str):
+    """
+    [解析] 滑动窗口提取 JSON
+    """
+    decoder = json.JSONDecoder()
+    pos = 0
+
+    while True:
+        pos = stdout.find('{', pos)
+        if pos == -1:
+            return None
+
+        try:
+            obj, _ = decoder.raw_decode(stdout[pos:])
+            # 简单验证：只要转成字符串后包含 test_results 就认为是我们要的
+            # (虽然递归查找更严谨，但这里先做初步筛选)
+            if "test_results" in str(obj):
+                return obj
+        except json.JSONDecodeError:
+            pass
+
+        pos += 1
+
+
+def find_test_results_recursive(data):
+    """
+    [递归查找] 深度优先搜索 'test_results' 字段
+    不管它被包裹在 'Exploit.t.sol:ExploitTest' 还是其他什么 Key 下面，都能找到。
+    """
+    if isinstance(data, dict):
+        # 1. 如果当前层级直接包含目标 Key，返回它
+        if "test_results" in data:
+            return data["test_results"]
+
+        # 2. 否则遍历所有 Value 继续找
+        for key, value in data.items():
+            found = find_test_results_recursive(value)
+            if found:
+                return found
+
+    # 3. 列表情况（虽然 Foundry 输出通常是字典，但也防御一下）
+    elif isinstance(data, list):
+        for item in data:
+            found = find_test_results_recursive(item)
+            if found:
+                return found
+
+    return None
+
+
 def run_forge_test(test_file_name: str = "Exploit.t.sol"):
     """
-    调用 Docker 运行 Foundry 测试 (JSON 解析版)
+    [执行] Docker + Foundry (递归解析版)
     """
     print(f"🐳 [Docker] 正在启动容器运行测试: {test_file_name}...")
 
     create_foundry_config()
 
-    # 这里的命令保持不变
     forge_command = (
         f"forge test "
         f"--match-path /app/{test_file_name} "
@@ -52,40 +103,41 @@ def run_forge_test(test_file_name: str = "Exploit.t.sol"):
         stdout = result.stdout
         stderr = result.stderr
 
-        is_success = False
-        logs_summary = ""
+        # 1. 尝试提取 JSON 对象
+        data = extract_json_from_stdout(stdout)
 
-        # === 新增：优雅的 JSON 解析 ===
-        try:
-            # Foundry 的 JSON 输出有时会包含多行，最后一行通常是结果
-            # 我们尝试找到包含 "test_results" 的那一行
-            data = None
-            for line in stdout.splitlines():
-                if line.strip().startswith("{") and "test_results" in line:
-                    data = json.loads(line)
-                    break
+        # 2. 逻辑分支判断
+        if data:
+            # === 关键修改：使用递归查找 ===
+            test_results = find_test_results_recursive(data)
 
-            if data:
-                # 遍历测试结果
-                results = data.get("test_results", {})
-                for test_name, res in results.items():
-                    status = res.get("status")
-                    reason = res.get("reason", "No reason provided")
+            if test_results:
+                logs_summary = ""
+                is_attack_success = False
 
-                    logs_summary += f"Test: {test_name}\nStatus: {status}\nReason: {reason}\n"
+                # 遍历所有测试用例的结果
+                for test_name, res in test_results.items():
+                    status = res.get("status")  # "Success" / "Failure"
+                    reason = res.get("reason", "None")
+                    logs_summary += f"Test: {test_name} | Status: {status} | Reason: {reason}\n"
 
                     if status == "Success":
-                        is_success = True
+                        is_attack_success = True
+
+                if is_attack_success:
+                    return "success", f"ATTACK SUCCESS!\n{logs_summary}"
+                else:
+                    return "failed", f"ATTACK FAILED (Logic).\n{logs_summary}"
             else:
-                # 如果没找到 JSON，回退到原始日志
-                logs_summary = stdout
+                # 提取到了 JSON，但在里面没找到 test_results 字段
+                # 可能是编译报错的 JSON 信息
+                return "error", f"JSON Parsed but 'test_results' not found recursively.\nData: {data}"
 
-        except json.JSONDecodeError:
-            logs_summary = f"JSON Parse Error. Raw Stdout:\n{stdout}"
+        # 3. 如果没拿到 JSON，检查返回码
+        if result.returncode != 0:
+            return "error", f"CRITICAL: Execution Failed (Code {result.returncode}).\nSTDERR:\n{stderr}\nSTDOUT:\n{stdout}"
 
-        # 最终返回
-        full_logs = f"Parsed Results:\n{logs_summary}\n\nRaw STDERR:\n{stderr}"
-        return is_success, full_logs
+        return "error", f"Unknown Error (No JSON found).\nSTDOUT:\n{stdout}"
 
     except Exception as e:
-        return False, f"Docker Execution Error: {str(e)}"
+        return "error", f"System Exception: {str(e)}"
