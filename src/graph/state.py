@@ -6,8 +6,8 @@ class AgentState(TypedDict):
     exploit_source: str  # 攻击脚本源码
     test_logs: str  # 运行日志
 
-    # === 修改点：使用字符串状态，而不是布尔值 ===
-    # 取值范围: "success" (攻击成功), "failed" (攻击失败), "error" (执行错误), "unknown" (初始)
-    execution_status: str
+    # === 新增：编译器反馈 ===
+    compiler_feedback: str  # 存放 Checker 的报错信息
 
-    round_count: int  # 当前轮次
+    execution_status: str  # success, failed, error
+    round_count: int
