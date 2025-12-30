@@ -16,7 +16,9 @@ def main():
         "target_source": initial_contract,
         "exploit_source": "",
         "test_logs": "",
-        "execution_status": "unknown",  # === 修改点：初始状态 ===
+        "compiler_feedback": "",
+        "slither_report": "",
+        "execution_status": "unknown",
         "round_count": 1
     }
 

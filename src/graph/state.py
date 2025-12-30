@@ -8,6 +8,7 @@ class AgentState(TypedDict):
 
     # === 新增：编译器反馈 ===
     compiler_feedback: str  # 存放 Checker 的报错信息
+    slither_report: str  # Slither 静态分析报告
 
     execution_status: str  # success, failed, error
     round_count: int
